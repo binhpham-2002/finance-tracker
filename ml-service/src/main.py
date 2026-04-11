@@ -5,6 +5,10 @@ from sklearn.cluster import KMeans
 from dotenv import load_dotenv
 import os
 import anthropic
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.naive_bayes import MultinomialNB
+import pickle
+import json
 
 load_dotenv()
 
@@ -181,6 +185,61 @@ Provide: 1) One sentence summary 2) Top 2 savings tips 3) Recommended budget spl
     except Exception as e:
         return {"error": str(e)}
     
+
+@app.post("/api/ml/categorize")
+def categorize_transaction(data: dict):
+    description = data.get("description", "")
+    merchant = data.get("merchant", "")
+    text_input = f"{description} {merchant}".strip()
+
+    if not text_input:
+        return {"category": None, "confidence": 0}
+
+    # Get training data from existing transactions
+    query = text("""
+        SELECT 
+            CONCAT(t.description, ' ', COALESCE(t.merchant, '')) as text_input,
+            c.name as category
+        FROM transactions t
+        JOIN categories c ON t.category_id = c.id
+        WHERE t.category_id IS NOT NULL
+    """)
+
+    with engine.connect() as conn:
+        df = pd.read_sql(query, conn)
+
+    if len(df) < 5:
+        return {
+            "category": None,
+            "confidence": 0,
+            "message": "Need at least 5 categorized transactions to train model"
+        }
+
+    # Train simple model
+    vectorizer = TfidfVectorizer(max_features=100, stop_words="english")
+    X = vectorizer.fit_transform(df["text_input"])
+    y = df["category"]
+
+    model = MultinomialNB()
+    model.fit(X, y)
+
+    # Predict
+    input_vector = vectorizer.transform([text_input])
+    predicted_category = model.predict(input_vector)[0]
+    confidence = float(max(model.predict_proba(input_vector)[0]))
+
+    # Get category ID
+    cat_query = text("SELECT id FROM categories WHERE name = :name")
+    with engine.connect() as conn:
+        result = conn.execute(cat_query, {"name": predicted_category}).fetchone()
+
+    category_id = result[0] if result else None
+
+    return {
+        "category": predicted_category,
+        "category_id": category_id,
+        "confidence": round(confidence, 3),
+    }
 
 if __name__ == "__main__":
     import uvicorn
