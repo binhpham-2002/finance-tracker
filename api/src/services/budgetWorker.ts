@@ -75,7 +75,7 @@ budgetWorker.on("completed", (job) => {
   console.log(`Budget check completed for job ${job.id}`);
 });
 
-budgetWorker.on("failed", (job, err) => {
+budgetWorker.on("failed", (job: Job | undefined, err: Error) => {
   console.error(`Budget check failed for job ${job?.id}:`, err.message);
 });
 

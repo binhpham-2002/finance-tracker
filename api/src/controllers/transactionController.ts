@@ -41,7 +41,7 @@ export async function createTransaction(req: Request, res: Response, next: NextF
         categoryId: data.categoryId,
       });
     }
-    
+
     res.status(201).json({ transaction });
   } catch (error) {
     next(error);
@@ -53,14 +53,13 @@ export async function getTransactions(req: Request, res: Response, next: NextFun
     const query = transactionQuerySchema.parse(req.query);
     const userId = req.user!.userId;
 
-    const where: any = { userId };
+    const where: Record<string, unknown> = { userId };
 
-    if (query.categoryId) where.categoryId = query.categoryId;
-    if (query.type) where.type = query.type;
     if (query.startDate || query.endDate) {
-      where.date = {};
-      if (query.startDate) where.date.gte = new Date(query.startDate);
-      if (query.endDate) where.date.lte = new Date(query.endDate);
+      const dateFilter: Record<string, Date> = {};
+      if (query.startDate) dateFilter.gte = new Date(query.startDate);
+      if (query.endDate) dateFilter.lte = new Date(query.endDate);
+      where.date = dateFilter;
     }
 
     const skip = (query.page - 1) * query.limit;
