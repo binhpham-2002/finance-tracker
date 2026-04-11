@@ -4,6 +4,7 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from dotenv import load_dotenv
 import os
+import anthropic
 
 load_dotenv()
 
@@ -11,6 +12,7 @@ app = FastAPI(title="Finance Tracker ML Service")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/finance")
 engine = create_engine(DATABASE_URL)
+claude = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 @app.get("/health")
 def health():
@@ -96,6 +98,89 @@ def get_spending_clusters(user_id: str):
         "total_transactions": len(df),
         "clusters": cluster_summary,
     }
+
+@app.get("/api/ml/advice/{user_id}")
+def get_budget_advice(user_id: str):
+    try:
+        query = text("""
+            SELECT 
+                c.name as category,
+                SUM(t.amount) as total_amount,
+                COUNT(*) as transaction_count
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = :user_id 
+                AND t.type = 'EXPENSE'
+                AND t.date >= date_trunc('month', CURRENT_DATE)
+            GROUP BY c.name
+            ORDER BY total_amount DESC
+        """)
+
+        income_query = text("""
+            SELECT COALESCE(SUM(amount), 0) as total_income
+            FROM transactions
+            WHERE user_id = :user_id 
+                AND type = 'INCOME'
+                AND date >= date_trunc('month', CURRENT_DATE)
+        """)
+
+        with engine.connect() as conn:
+            spending_df = pd.read_sql(query, conn, params={"user_id": user_id})
+            income_df = pd.read_sql(income_query, conn, params={"user_id": user_id})
+
+        if spending_df.empty:
+            return {"advice": "No spending data found this month."}
+
+        total_income = float(income_df["total_income"].iloc[0])
+        total_expense = float(spending_df["total_amount"].sum())
+
+        spending_summary = ""
+        for _, row in spending_df.iterrows():
+            spending_summary += f"- {row['category']}: ${float(row['total_amount']):.2f} ({int(row['transaction_count'])} transactions)\n"
+
+        top_category = spending_df.iloc[0]["category"]
+        top_amount = float(spending_df.iloc[0]["total_amount"])
+        savings_rate = ((total_income - total_expense) / total_income * 100) if total_income > 0 else 0
+
+        try:
+            prompt = f"""You are a personal finance advisor. Based on this spending data, provide brief advice.
+
+Monthly Income: ${total_income:.2f}
+Monthly Expenses: ${total_expense:.2f}
+Net Savings: ${total_income - total_expense:.2f}
+
+Spending breakdown:
+{spending_summary}
+
+Provide: 1) One sentence summary 2) Top 2 savings tips 3) Recommended budget split. Under 200 words."""
+
+            message = claude.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            advice_text = message.content[0].text
+        except Exception as e:
+            advice_text = (
+                f"Based on your data: Income ${total_income:.2f}, Expenses ${total_expense:.2f}, "
+                f"Savings rate {savings_rate:.0f}%. "
+                f"Top spending: {top_category} (${top_amount:.2f}). "
+                f"Tip: Aim for 20% savings rate. "
+                f"(AI advisor unavailable: {str(e)[:80]})"
+            )
+
+        return {
+            "user_id": user_id,
+            "monthly_income": total_income,
+            "monthly_expenses": total_expense,
+            "net_savings": total_income - total_expense,
+            "savings_rate_percent": round(savings_rate, 1),
+            "spending_breakdown": spending_df.to_dict("records"),
+            "ai_advice": advice_text,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    
 
 if __name__ == "__main__":
     import uvicorn
