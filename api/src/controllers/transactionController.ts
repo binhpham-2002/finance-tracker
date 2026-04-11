@@ -8,6 +8,23 @@ import { ApiError } from "../middleware/errorHandler";
 import { getCache, setCache, deleteCache } from "../services/cacheService";
 import { budgetAlertQueue } from "../config/queue";
 
+async function autoCategorizeFetch(description: string, merchant?: string): Promise<string | null> {
+  try {
+    const response = await fetch("http://localhost:8000/api/ml/categorize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description, merchant }),
+    });
+    const data = await response.json() as { category_id?: string; confidence?: number };
+    if (data.category_id && data.confidence && data.confidence > 0.3) {
+      return data.category_id;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function createTransaction(req: Request, res: Response, next: NextFunction) {
   try {
     const data = createTransactionSchema.parse(req.body);
@@ -21,6 +38,13 @@ export async function createTransaction(req: Request, res: Response, next: NextF
       throw ApiError.notFound("Account not found");
     }
 
+    if (!data.categoryId) {
+      const predictedId = await autoCategorizeFetch(data.description, data.merchant);
+      if (predictedId) {
+        data.categoryId = predictedId;
+      }
+    }
+    
     const transaction = await prisma.transaction.create({
       data: {
         ...data,
