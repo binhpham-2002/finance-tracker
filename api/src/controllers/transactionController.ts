@@ -94,18 +94,18 @@ export async function getTransactions(req: Request, res: Response, next: NextFun
 
 export async function deleteTransaction(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const userId = req.user!.userId;
 
     const existing = await prisma.transaction.findFirst({
-      where: { id, userId },
+    where: { id: id, userId: userId as string },
     });
 
     if (!existing) {
       throw ApiError.notFound("Transaction not found");
     }
 
-    await prisma.transaction.delete({ where: { id } });
+    await prisma.transaction.delete({ where: { id: id } });
 
     await deleteCache(`summary:${userId}:*`);
 
