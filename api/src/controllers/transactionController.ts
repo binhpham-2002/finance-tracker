@@ -7,6 +7,7 @@ import {
 import { ApiError } from "../middleware/errorHandler";
 import { getCache, setCache, deleteCache } from "../services/cacheService";
 import { budgetAlertQueue } from "../config/queue";
+import { reportQueue } from "../config/queue";
 
 async function autoCategorizeFetch(description: string, merchant?: string): Promise<string | null> {
   try {
@@ -44,7 +45,7 @@ export async function createTransaction(req: Request, res: Response, next: NextF
         data.categoryId = predictedId;
       }
     }
-    
+
     const transaction = await prisma.transaction.create({
       data: {
         ...data,
@@ -207,6 +208,18 @@ export async function getMonthlySummary(req: Request, res: Response, next: NextF
     await setCache(cacheKey, result);
 
     res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function triggerWeeklyReport(req: Request, res: Response, next: NextFunction) {
+  try {
+    const userId = req.user!.userId;
+
+    await reportQueue.add("generate-report", { userId });
+
+    res.json({ message: "Weekly report queued" });
   } catch (error) {
     next(error);
   }
