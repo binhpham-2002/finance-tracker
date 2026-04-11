@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 import pandas as pd
 from sklearn.cluster import KMeans
@@ -13,6 +14,13 @@ import json
 load_dotenv()
 
 app = FastAPI(title="Finance Tracker ML Service")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/finance")
 engine = create_engine(DATABASE_URL)
