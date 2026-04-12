@@ -11,17 +11,18 @@ import { reportQueue } from "../config/queue";
 
 async function autoCategorizeFetch(description: string, merchant?: string): Promise<string | null> {
   try {
-    const response = await fetch("http://localhost:8000/api/ml/categorize", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ description, merchant }),
+    const axios = require("axios");
+    const res = await axios.post("http://localhost:8000/api/ml/categorize", {
+      description,
+      merchant: merchant || "",
     });
-    const data = await response.json() as { category_id?: string; confidence?: number };
-    if (data.category_id && data.confidence && data.confidence > 0.5) {
-      return data.category_id;
+    console.log("[ML Debug] response:", JSON.stringify(res.data));
+    if (res.data.category_id && res.data.confidence && res.data.confidence > 0.3) {
+      return res.data.category_id;
     }
     return null;
-  } catch {
+  } catch (err: any) {
+    console.log("[ML Debug] error:", err.message);
     return null;
   }
 }
@@ -39,16 +40,24 @@ export async function createTransaction(req: Request, res: Response, next: NextF
       throw ApiError.notFound("Account not found");
     }
 
-    if (!data.categoryId) {
+    let finalCategoryId = data.categoryId;
+    if (!finalCategoryId) {
       const predictedId = await autoCategorizeFetch(data.description, data.merchant);
+      console.log("[ML Debug] predicted:", predictedId);
       if (predictedId) {
-        data.categoryId = predictedId;
+        finalCategoryId = predictedId;
       }
     }
 
     const transaction = await prisma.transaction.create({
       data: {
-        ...data,
+        accountId: data.accountId,
+        amount: data.amount,
+        type: data.type,
+        description: data.description,
+        merchant: data.merchant,
+        isRecurring: data.isRecurring,
+        categoryId: finalCategoryId || undefined,
         date: new Date(data.date),
         userId,
       },
@@ -57,6 +66,18 @@ export async function createTransaction(req: Request, res: Response, next: NextF
         account: { select: { id: true, accountName: true } },
       },
     });
+
+    if (data.type === "EXPENSE") {
+      await prisma.account.update({
+        where: { id: data.accountId },
+        data: { balance: { decrement: Number(data.amount) } },
+      });
+    } else if (data.type === "INCOME") {
+      await prisma.account.update({
+        where: { id: data.accountId },
+        data: { balance: { increment: Number(data.amount) } },
+      });
+    }
 
     await deleteCache(`summary:${userId}:*`);
     
@@ -131,6 +152,18 @@ export async function deleteTransaction(req: Request, res: Response, next: NextF
     }
 
     await prisma.transaction.delete({ where: { id: id } });
+
+    if (existing.type === "EXPENSE") {
+      await prisma.account.update({
+        where: { id: existing.accountId },
+        data: { balance: { increment: Number(existing.amount) } },
+      });
+    } else if (existing.type === "INCOME") {
+      await prisma.account.update({
+        where: { id: existing.accountId },
+        data: { balance: { decrement: Number(existing.amount) } },
+      });
+    }
 
     await deleteCache(`summary:${userId}:*`);
 
