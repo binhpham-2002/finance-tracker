@@ -17,7 +17,7 @@ async function autoCategorizeFetch(description: string, merchant?: string): Prom
       body: JSON.stringify({ description, merchant }),
     });
     const data = await response.json() as { category_id?: string; confidence?: number };
-    if (data.category_id && data.confidence && data.confidence > 0.3) {
+    if (data.category_id && data.confidence && data.confidence > 0.5) {
       return data.category_id;
     }
     return null;
