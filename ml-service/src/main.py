@@ -10,6 +10,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
 import pickle
 import json
+import anthropic
+from agent import run_agent
 
 load_dotenv()
 
@@ -249,6 +251,21 @@ def categorize_transaction(data: dict):
         "confidence": round(confidence, 3),
     }
 
+@app.post("/api/ml/agent")
+def agent_endpoint(data: dict):
+    goal = data.get("goal", "")
+    token = data.get("token", "")
+    user_id = data.get("user_id", "")
+
+    if not goal or not token or not user_id:
+        return {"error": "goal, token, and user_id are required"}
+
+    try:
+        result = run_agent(goal, token, user_id)
+        return {"goal": goal, "agent_response": result}
+    except Exception as e:
+        return {"error": str(e)}
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

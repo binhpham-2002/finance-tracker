@@ -39,6 +39,12 @@ function App() {
   const [regFirstName, setRegFirstName] = useState("");
   const [regLastName, setRegLastName] = useState("");
 
+  // Agent state
+  const [agentGoal, setAgentGoal] = useState("");
+  const [agentResponse, setAgentResponse] = useState("");
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [showAgent, setShowAgent] = useState(false);
+
   const getHeaders = () => ({ Authorization: `Bearer ${token}` });
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
 
@@ -116,18 +122,37 @@ function App() {
     } catch { alert("Failed"); }
   };
 
-  const deleteAccount = async (id: string) => {
-    if (!window.confirm("Delete this account? All transactions in this account will also be deleted.")) return;
-    try {
-      await axios.delete(`${API}/accounts/${id}`, { headers: getHeaders() });
-      showToast("Account deleted");
-      fetchAll(); fetchML();
-    } catch { alert("Failed to delete account"); }
-  };
-
   const deleteTransaction = async (id: string) => {
     if (!window.confirm("Delete?")) return;
     try { await axios.delete(`${API}/transactions/${id}`, { headers: getHeaders() }); showToast("Deleted"); fetchAll(); fetchML(); } catch { alert("Failed"); }
+  };
+
+  const deleteAllTransactions = async () => {
+    if (!window.confirm("Delete ALL transactions? This cannot be undone.")) return;
+    try { await axios.delete(`${API}/transactions/all/clear`, { headers: getHeaders() }); showToast("All transactions deleted"); fetchAll(); fetchML(); } catch { alert("Failed"); }
+  };
+
+  const deleteAccount = async (id: string) => {
+    if (!window.confirm("Delete this account and all its transactions?")) return;
+    try { await axios.delete(`${API}/accounts/${id}`, { headers: getHeaders() }); showToast("Account deleted"); fetchAll(); fetchML(); } catch { alert("Failed"); }
+  };
+
+  const runAgent = async () => {
+    if (!agentGoal.trim()) return;
+    setAgentLoading(true);
+    setAgentResponse("");
+    try {
+      const res = await axios.post(`${ML_API}/agent`, {
+        goal: agentGoal,
+        token: token,
+        user_id: userId,
+      });
+      setAgentResponse(res.data.agent_response || res.data.error || "Agent could not complete the task.");
+      fetchAll();
+    } catch (e: any) {
+      setAgentResponse("Agent error: " + (e.message || "Unknown error"));
+    }
+    setAgentLoading(false);
   };
 
   if (!loggedIn) return (
@@ -139,15 +164,6 @@ function App() {
     <button className="btn-link" onClick={()=>setIsRegister(!isRegister)}>{isRegister?"Already have an account? Sign in":"New here? Create an account"}</button></div></div></div>
   );
 
-  const deleteAllTransactions = async () => {
-    if (!window.confirm("Delete ALL transactions? This cannot be undone.")) return;
-    try {
-      await axios.delete(`${API}/transactions/all/clear`, { headers: getHeaders() });
-      showToast("All transactions deleted");
-      fetchAll(); fetchML();
-    } catch { alert("Failed"); }
-  };
-
   const pieData = summary?.spendingByCategory?.map((s:any)=>({name:s.category?.name||"Uncategorized",value:Number(s.total)}))||[];
   const totalIncome=summary?Number(summary.totalIncome):0;
   const totalExpense=summary?Number(summary.totalExpense):0;
@@ -156,10 +172,31 @@ function App() {
 
   return (
     <div className="dashboard">{toast&&<div className="toast">{toast}</div>}
-    <nav className="sidebar"><div className="sidebar-logo">FT</div><div className="sidebar-nav"><button className="nav-item active">Dashboard</button></div><div className="sidebar-user"><div className="avatar">{userName.charAt(0)}</div><span>{userName}</span><button className="btn-logout" onClick={()=>{setLoggedIn(false);setToken("")}}>Logout</button></div></nav>
+    <nav className="sidebar"><div className="sidebar-logo">FT</div><div className="sidebar-nav"><button className="nav-item active">Dashboard</button><button className={"nav-item" + (showAgent?" active":"")} onClick={()=>setShowAgent(!showAgent)}>AI Agent</button></div><div className="sidebar-user"><div className="avatar">{userName.charAt(0)}</div><span>{userName}</span><button className="btn-logout" onClick={()=>{setLoggedIn(false);setToken("")}}>Logout</button></div></nav>
     <main className="main-content">
       <div className="top-bar"><div><h1>Dashboard</h1><p className="subtitle">{mn[new Date().getMonth()]} {new Date().getFullYear()} Overview</p></div>
       <div className="top-actions"><button className="btn-action" onClick={()=>setActiveForm(activeForm==="account"?null:"account")}>+ Account</button><button className="btn-action" onClick={()=>{setActiveForm(activeForm==="transaction"?null:"transaction");if(accounts.length>0)setNewTx(t=>({...t,accountId:accounts[0].id}))}}>+ Transaction</button><button className="btn-action btn-accent" onClick={()=>setActiveForm(activeForm==="budget"?null:"budget")}>+ Budget</button></div></div>
+
+      {showAgent && (
+        <div className="agent-panel">
+          <div className="agent-header">
+            <h3>AI Finance Agent</h3>
+            <p className="agent-desc">Tell the agent your financial goal. It will analyze your data, set budgets, and create an action plan automatically.</p>
+          </div>
+          <div className="agent-input-row">
+            <input className="agent-input" placeholder='e.g. "Help me save $500 this month" or "Set budgets for all my categories"' value={agentGoal} onChange={e=>setAgentGoal(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!agentLoading)runAgent()}} />
+            <button className="btn-agent" onClick={runAgent} disabled={agentLoading}>{agentLoading ? "Thinking..." : "Run Agent"}</button>
+          </div>
+          {agentLoading && <div className="agent-loading"><div className="spinner"></div><span>Agent is analyzing your finances and taking actions...</span></div>}
+          {agentResponse && <div className="agent-result"><div className="agent-response">{agentResponse}</div></div>}
+          <div className="agent-examples">
+            <span>Try:</span>
+            {["Help me save $500 this month","Analyze my spending and suggest improvements","Set budgets for all categories based on my income"].map(ex=>(
+              <button key={ex} className="agent-example-btn" onClick={()=>{setAgentGoal(ex)}}>{ex}</button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {activeForm==="account"&&<div className="form-panel"><div className="form-panel-header"><h3>New Account</h3><button className="btn-close" onClick={()=>setActiveForm(null)}>Close</button></div><p className="form-hint">Same name + type = balance merged automatically.</p><div className="form-grid"><div className="input-group"><label>Account name</label><input placeholder="e.g. Chase Bank" value={newAccount.accountName} onChange={e=>setNewAccount({...newAccount,accountName:e.target.value})}/></div><div className="input-group"><label>Type</label><select value={newAccount.accountType} onChange={e=>setNewAccount({...newAccount,accountType:e.target.value})}><option value="CHECKING">Checking</option><option value="SAVINGS">Savings</option><option value="CREDIT_CARD">Credit Card</option><option value="INVESTMENT">Investment</option></select></div><div className="input-group"><label>Balance ($)</label><input type="number" min="0" step="0.01" placeholder="0.00" value={newAccount.balance} onChange={e=>setNewAccount({...newAccount,balance:e.target.value})}/></div><div className="input-group form-submit"><button className="btn-primary" onClick={createAccount}>Create</button></div></div></div>}
 
@@ -167,7 +204,8 @@ function App() {
 
       {activeForm==="budget"&&<div className="form-panel"><div className="form-panel-header"><h3>Set Monthly Budget</h3><button className="btn-close" onClick={()=>setActiveForm(null)}>Close</button></div><div className="form-grid"><div className="input-group"><label>Category</label><select value={newBudget.categoryId} onChange={e=>setNewBudget({...newBudget,categoryId:e.target.value})}><option value="">Select a category...</option>{categories.map(c=><option key={c.id} value={c.id}>{c.icon||"📌"} {c.name}</option>)}</select></div><div className="input-group"><label>Amount ($)</label><input type="number" min="1" step="0.01" placeholder="500.00" value={newBudget.amount} onChange={e=>setNewBudget({...newBudget,amount:e.target.value})}/></div><div className="input-group"><label>Month</label><select value={newBudget.month} onChange={e=>setNewBudget({...newBudget,month:e.target.value})}>{mn.map((m,i)=><option key={i+1} value={i+1}>{m}</option>)}</select></div><div className="input-group"><label>Year</label><input type="number" min="2024" max="2030" value={newBudget.year} onChange={e=>setNewBudget({...newBudget,year:e.target.value})}/></div><div className="input-group form-submit"><button className="btn-primary" onClick={createBudget}>Set Budget</button></div></div></div>}
 
-{accounts.length>0&&<div className="accounts-bar">{accounts.map(a=><div key={a.id} className="account-chip"><span className="account-type">{a.accountType==="CHECKING"?"🏦":a.accountType==="SAVINGS"?"🐷":a.accountType==="CREDIT_CARD"?"💳":"📈"}</span><div><div className="account-name">{a.accountName}</div><div className="account-balance">${Number(a.balance).toLocaleString()}</div></div><button className="btn-del" onClick={()=>deleteAccount(a.id)} title="Delete account">&#x2715;</button></div>)}</div>}
+      {accounts.length>0&&<div className="accounts-bar">{accounts.map(a=><div key={a.id} className="account-chip"><span className="account-type">{a.accountType==="CHECKING"?"🏦":a.accountType==="SAVINGS"?"🐷":a.accountType==="CREDIT_CARD"?"💳":"📈"}</span><div><div className="account-name">{a.accountName}</div><div className="account-balance">${Number(a.balance).toLocaleString()}</div></div><button className="btn-del" onClick={()=>deleteAccount(a.id)} title="Delete account">&#x2715;</button></div>)}</div>}
+
       <div className="summary-row"><div className="summary-card card-income"><p className="summary-label">Income</p><p className="summary-value">${totalIncome.toLocaleString()}</p></div><div className="summary-card card-expense"><p className="summary-label">Expenses</p><p className="summary-value">${totalExpense.toLocaleString()}</p></div><div className="summary-card card-savings"><p className="summary-label">Net Savings</p><p className="summary-value">${netSavings.toLocaleString()}</p></div></div>
 
       <div className="charts-row"><div className="chart-card"><h3>Spending by category</h3>{pieData.length>0?<ResponsiveContainer width="100%" height={260}><PieChart><Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={90} paddingAngle={3} label={({name,percent}:any)=>`${name} ${(percent*100).toFixed(0)}%`}>{pieData.map((_:any,i:number)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie><Tooltip formatter={(v:any)=>`$${Number(v).toFixed(2)}`}/></PieChart></ResponsiveContainer>:<div className="empty-state">No spending data yet</div>}</div>
@@ -175,7 +213,8 @@ function App() {
 
       <div className="advice-section"><h3>AI Budget Advisor</h3><div className="advice-content">{advice||"Add transactions to get AI advice..."}</div></div>
 
-      <div className="transactions-section"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px"}}><h3>Recent transactions</h3>{transactions.length>0&&<button className="btn-del" style={{width:"auto",padding:"6px 14px",borderRadius:"8px",fontSize:"12px"}} onClick={deleteAllTransactions}>Clear all</button>}</div>{transactions.length===0?<div className="empty-state">No transactions yet.</div>:<div className="tx-table">{transactions.map(tx=><div key={tx.id} className="tx-row"><div className="tx-icon-wrap"><span className="tx-icon">{tx.category?.icon||"📌"}</span></div><div className="tx-info"><div className="tx-desc">{tx.description}</div><div className="tx-meta">{tx.category?.name||"Uncategorized"} · {tx.account?.accountName} · {new Date(tx.date).toLocaleDateString()}</div></div><div className="tx-end"><span className={`tx-amount ${tx.type.toLowerCase()}`}>{tx.type==="INCOME"?"+":"-"}${Number(tx.amount).toLocaleString(undefined,{minimumFractionDigits:2})}</span><button className="btn-del" onClick={()=>deleteTransaction(tx.id)}>&#x2715;</button></div></div>)}</div>}</div>    </main></div>
+      <div className="transactions-section"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px"}}><h3>Recent transactions</h3>{transactions.length>0&&<button className="btn-del" style={{width:"auto",padding:"6px 14px",borderRadius:"8px",fontSize:"12px"}} onClick={deleteAllTransactions}>Clear all</button>}</div>{transactions.length===0?<div className="empty-state">No transactions yet.</div>:<div className="tx-table">{transactions.map(tx=><div key={tx.id} className="tx-row"><div className="tx-icon-wrap"><span className="tx-icon">{tx.category?.icon||"📌"}</span></div><div className="tx-info"><div className="tx-desc">{tx.description}</div><div className="tx-meta">{tx.category?.name||"Uncategorized"} · {tx.account?.accountName} · {new Date(tx.date).toLocaleDateString()}</div></div><div className="tx-end"><span className={`tx-amount ${tx.type.toLowerCase()}`}>{tx.type==="INCOME"?"+":"-"}${Number(tx.amount).toLocaleString(undefined,{minimumFractionDigits:2})}</span><button className="btn-del" onClick={()=>deleteTransaction(tx.id)}>&#x2715;</button></div></div>)}</div>}</div>
+    </main></div>
   );
 }
 
