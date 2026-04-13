@@ -139,6 +139,15 @@ function App() {
     <button className="btn-link" onClick={()=>setIsRegister(!isRegister)}>{isRegister?"Already have an account? Sign in":"New here? Create an account"}</button></div></div></div>
   );
 
+  const deleteAllTransactions = async () => {
+    if (!window.confirm("Delete ALL transactions? This cannot be undone.")) return;
+    try {
+      await axios.delete(`${API}/transactions/all/clear`, { headers: getHeaders() });
+      showToast("All transactions deleted");
+      fetchAll(); fetchML();
+    } catch { alert("Failed"); }
+  };
+
   const pieData = summary?.spendingByCategory?.map((s:any)=>({name:s.category?.name||"Uncategorized",value:Number(s.total)}))||[];
   const totalIncome=summary?Number(summary.totalIncome):0;
   const totalExpense=summary?Number(summary.totalExpense):0;
@@ -166,8 +175,7 @@ function App() {
 
       <div className="advice-section"><h3>AI Budget Advisor</h3><div className="advice-content">{advice||"Add transactions to get AI advice..."}</div></div>
 
-      <div className="transactions-section"><h3>Recent transactions</h3>{transactions.length===0?<div className="empty-state">No transactions yet.</div>:<div className="tx-table">{transactions.map(tx=><div key={tx.id} className="tx-row"><div className="tx-icon-wrap"><span className="tx-icon">{tx.category?.icon||"📌"}</span></div><div className="tx-info"><div className="tx-desc">{tx.description}</div><div className="tx-meta">{tx.category?.name||"Uncategorized"} · {tx.account?.accountName} · {new Date(tx.date).toLocaleDateString()}</div></div><div className="tx-end"><span className={`tx-amount ${tx.type.toLowerCase()}`}>{tx.type==="INCOME"?"+":"-"}${Number(tx.amount).toLocaleString(undefined,{minimumFractionDigits:2})}</span><button className="btn-del" onClick={()=>deleteTransaction(tx.id)}>&#x2715;</button></div></div>)}</div>}</div>
-    </main></div>
+      <div className="transactions-section"><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"14px"}}><h3>Recent transactions</h3>{transactions.length>0&&<button className="btn-del" style={{width:"auto",padding:"6px 14px",borderRadius:"8px",fontSize:"12px"}} onClick={deleteAllTransactions}>Clear all</button>}</div>{transactions.length===0?<div className="empty-state">No transactions yet.</div>:<div className="tx-table">{transactions.map(tx=><div key={tx.id} className="tx-row"><div className="tx-icon-wrap"><span className="tx-icon">{tx.category?.icon||"📌"}</span></div><div className="tx-info"><div className="tx-desc">{tx.description}</div><div className="tx-meta">{tx.category?.name||"Uncategorized"} · {tx.account?.accountName} · {new Date(tx.date).toLocaleDateString()}</div></div><div className="tx-end"><span className={`tx-amount ${tx.type.toLowerCase()}`}>{tx.type==="INCOME"?"+":"-"}${Number(tx.amount).toLocaleString(undefined,{minimumFractionDigits:2})}</span><button className="btn-del" onClick={()=>deleteTransaction(tx.id)}>&#x2715;</button></div></div>)}</div>}</div>    </main></div>
   );
 }
 

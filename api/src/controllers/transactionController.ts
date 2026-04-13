@@ -17,7 +17,8 @@ async function autoCategorizeFetch(description: string, merchant?: string): Prom
       merchant: merchant || "",
     });
     console.log("[ML Debug] response:", JSON.stringify(res.data));
-    if (res.data.category_id && res.data.confidence && res.data.confidence > 0.3) {
+    console.log("[ML Debug] sent:", description, merchant);
+    if (res.data.category_id && res.data.confidence && res.data.confidence > 0.1) {
       return res.data.category_id;
     }
     return null;
@@ -67,16 +68,20 @@ export async function createTransaction(req: Request, res: Response, next: NextF
       },
     });
 
-    if (data.type === "EXPENSE") {
-      await prisma.account.update({
-        where: { id: data.accountId },
-        data: { balance: { decrement: Number(data.amount) } },
-      });
-    } else if (data.type === "INCOME") {
-      await prisma.account.update({
-        where: { id: data.accountId },
-        data: { balance: { increment: Number(data.amount) } },
-      });
+    const txAccount = await prisma.account.findUnique({ where: { id: data.accountId } });
+    if (txAccount) {
+      const isCreditCard = txAccount.accountType === "CREDIT_CARD";
+      if (data.type === "EXPENSE") {
+        await prisma.account.update({
+          where: { id: data.accountId },
+          data: { balance: isCreditCard ? { increment: Number(data.amount) } : { decrement: Number(data.amount) } },
+        });
+      } else if (data.type === "INCOME") {
+        await prisma.account.update({
+          where: { id: data.accountId },
+          data: { balance: isCreditCard ? { decrement: Number(data.amount) } : { increment: Number(data.amount) } },
+        });
+      }
     }
 
     await deleteCache(`summary:${userId}:*`);
@@ -153,16 +158,20 @@ export async function deleteTransaction(req: Request, res: Response, next: NextF
 
     await prisma.transaction.delete({ where: { id: id } });
 
-    if (existing.type === "EXPENSE") {
-      await prisma.account.update({
-        where: { id: existing.accountId },
-        data: { balance: { increment: Number(existing.amount) } },
-      });
-    } else if (existing.type === "INCOME") {
-      await prisma.account.update({
-        where: { id: existing.accountId },
-        data: { balance: { decrement: Number(existing.amount) } },
-      });
+    const delAccount = await prisma.account.findUnique({ where: { id: existing.accountId } });
+    if (delAccount) {
+      const isCreditCard = delAccount.accountType === "CREDIT_CARD";
+      if (existing.type === "EXPENSE") {
+        await prisma.account.update({
+          where: { id: existing.accountId },
+          data: { balance: isCreditCard ? { decrement: Number(existing.amount) } : { increment: Number(existing.amount) } },
+        });
+      } else if (existing.type === "INCOME") {
+        await prisma.account.update({
+          where: { id: existing.accountId },
+          data: { balance: isCreditCard ? { increment: Number(existing.amount) } : { decrement: Number(existing.amount) } },
+        });
+      }
     }
 
     await deleteCache(`summary:${userId}:*`);
@@ -253,6 +262,22 @@ export async function triggerWeeklyReport(req: Request, res: Response, next: Nex
     await reportQueue.add("generate-report", { userId });
 
     res.json({ message: "Weekly report queued" });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteAllTransactions(req: Request, res: Response, next: NextFunction) {
+  try {
+    const userId = req.user!.userId;
+
+    await prisma.transaction.deleteMany({
+      where: { userId },
+    });
+
+    await deleteCache(`summary:${userId}:*`);
+
+    res.json({ message: "All transactions deleted" });
   } catch (error) {
     next(error);
   }

@@ -5,6 +5,7 @@ import {
   deleteTransaction,
   getMonthlySummary,
   triggerWeeklyReport,
+  deleteAllTransactions,
 } from "../controllers/transactionController";
 import { authenticate } from "../middleware/auth";
 
@@ -17,5 +18,6 @@ router.get("/", getTransactions);
 router.get("/summary", getMonthlySummary);
 router.delete("/:id", deleteTransaction);
 router.post("/report", triggerWeeklyReport);
+router.delete("/all/clear", deleteAllTransactions);
 
 export default router;
